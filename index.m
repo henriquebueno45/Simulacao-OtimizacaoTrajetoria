@@ -99,30 +99,9 @@ title('Ambiente de Navegação com Pontos Inicial e Final');
 
 %% 1. WaveFront Planner
 tic;
-% Reduzindo a resolução do grid para o WaveFront
-scaleFactor = 2; % Reduz a resolução pela metade
-envReduced = imresize(environment, 1/scaleFactor, 'nearest');  % Usando 'nearest' para manter obstáculos
-startPosReduced = max(1, round(startPos/scaleFactor));  % Garantindo posição mínima de 1
-goalPosReduced = max(1, round(goalPos/scaleFactor));    % Garantindo posição mínima de 1
-
-% Garantir que as posições reduzidas não estejam em obstáculos
-if envReduced(startPosReduced(2), startPosReduced(1)) == 1
-    startPosReduced = findFreeCell(envReduced, startPosReduced);
-end
-
-if envReduced(goalPosReduced(2), goalPosReduced(1)) == 1
-    goalPosReduced = findFreeCell(envReduced, goalPosReduced);
-end
-
-% Verificar se as posições são válidas antes de chamar o wavefrontPlanner
-if isempty(startPosReduced) || isempty(goalPosReduced)
-    error('Não foi possível encontrar posições válidas após a redução de escala.');
-end
-
 try
-    [pathWaveFrontReduced, distWaveFront] = wavefrontPlanner(envReduced, startPosReduced, goalPosReduced);
-    % Escala o caminho de volta para a resolução original
-    pathWaveFront = pathWaveFrontReduced * scaleFactor;
+    % Usar o ambiente original ao invés de reduzir a escala
+    [pathWaveFront, distWaveFront] = wavefrontPlanner(environment, startPos, goalPos);
 catch e
     warning('WaveFront falhou. Usando caminho alternativo.');
     % Usar A* como fallback
@@ -173,53 +152,81 @@ function [path, dist] = wavefrontPlanner(env, start, goal)
     grid = inf(rows, cols);
     grid(goal(2), goal(1)) = 0;
     
-    % Usando matriz lógica para queue
-    inQueue = false(rows, cols);
-    inQueue(goal(2), goal(1)) = true;
-    queue = goal;
+    % Queue para processamento
+    queue = [goal(2), goal(1)];
+    processed = false(rows, cols);
     
-    % Pré-computar direções e custos
-    directions = [-1, 0; 1, 0; 0, -1; 0, 1; -1, -1; -1, 1; 1, -1; 1, 1];
-    costs = [ones(4,1); sqrt(2)*ones(4,1)];
+    % Direções: 4-conectividade para maior precisão
+    directions = [-1, 0; 1, 0; 0, -1; 0, 1];
     
+    % Expansão da onda
     while ~isempty(queue)
-        [current, queue] = deal(queue(1, :), queue(2:end, :));
+        current = queue(1, :);
+        queue(1, :) = [];
         
+        if processed(current(1), current(2))
+            continue;
+        end
+        
+        processed(current(1), current(2)) = true;
+        
+        % Verificar vizinhos
         for d = 1:size(directions, 1)
-            neighbor = current + directions(d, :);
-            if neighbor(1) > 0 && neighbor(1) <= cols && neighbor(2) > 0 && neighbor(2) <= rows
-                % Custo ajustado para movimento diagonal
-                if abs(directions(d, 1)) + abs(directions(d, 2)) == 2
-                    stepCost = sqrt(2);
-                else
-                    stepCost = 1;
-                end
+            ny = current(1) + directions(d, 1);
+            nx = current(2) + directions(d, 2);
+            
+            % Verificar limites e obstáculos
+            if ny >= 1 && ny <= rows && nx >= 1 && nx <= cols && ...
+               env(ny, nx) == 0 && ~processed(ny, nx)
                 
-                if env(neighbor(2), neighbor(1)) == 0 && grid(neighbor(2), neighbor(1)) > grid(current(2), current(1)) + stepCost
-                    grid(neighbor(2), neighbor(1)) = grid(current(2), current(1)) + stepCost;
-                    queue = [queue; neighbor];
+                % Atualizar distância
+                newDist = grid(current(1), current(2)) + 1;
+                if newDist < grid(ny, nx)
+                    grid(ny, nx) = newDist;
+                    queue = [queue; ny, nx];
                 end
             end
         end
     end
     
-    % Traçando o caminho de volta
-    current = start;
-    path = current;
+    % Verificar se um caminho foi encontrado
+    if isinf(grid(start(2), start(1)))
+        error('Nenhum caminho encontrado pelo WaveFront.');
+    end
+    
+    % Traçar caminho de volta
+    path = [start(1), start(2)];
+    current = [start(2), start(1)];
     dist = 0;
     
-    while ~isequal(current, goal)
-        neighbors = getNeighbors(current, rows, cols);
-        validNeighbors = neighbors((arrayfun(@(j) grid(neighbors(j, 2), neighbors(j, 1)), 1:size(neighbors, 1))) < inf, :);
+    while ~(current(1) == goal(2) && current(2) == goal(1))
+        % Encontrar o vizinho com menor valor
+        minVal = inf;
+        nextStep = current;
         
-        if isempty(validNeighbors)
-            error('Nenhum caminho encontrado pelo WaveFront.');
+        for d = 1:size(directions, 1)
+            ny = current(1) + directions(d, 1);
+            nx = current(2) + directions(d, 2);
+            
+            if ny >= 1 && ny <= rows && nx >= 1 && nx <= cols && ...
+               env(ny, nx) == 0 && grid(ny, nx) < minVal
+                minVal = grid(ny, nx);
+                nextStep = [ny, nx];
+            end
         end
         
-        [~, idx] = min(arrayfun(@(k) grid(validNeighbors(k, 2), validNeighbors(k, 1)), 1:size(validNeighbors, 1)));
-        current = validNeighbors(idx, :);
-        path = [path; current];
-        dist = dist + 1;
+        if isequal(nextStep, current)
+            error('Caminho bloqueado no WaveFront.');
+        end
+        
+        % Adicionar ao caminho
+        current = nextStep;
+        path = [path; current(2), current(1)];
+        
+        % Calcular distância
+        if size(path, 1) > 1
+            dist = dist + norm(path(end,:) - path(end-1,:));
+        end
     end
 end
 
@@ -677,3 +684,4 @@ function path = generateSimplePath(start, goal, env)
         end
     end
 end
+
