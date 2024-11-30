@@ -14,6 +14,7 @@ scenarios.easy.obstacles = [
     10, 10, 10, 30;  % [x1, y1, x2, y2]
     40, 40, 45, 45;
     18, 35, 20, 40;
+    10, 40, 10, 50;
 ];
 
 % Cenário Intermediário
@@ -52,7 +53,7 @@ scenarios.hard.obstacles = [
 ];
 
 % Seleção do cenário (pode ser 'easy', 'medium' ou 'hard')
-currentScenario = 'medium';  % Altere aqui para mudar o cenário
+currentScenario = 'easy';  % Altere aqui para mudar o cenário
 selected = scenarios.(currentScenario);
 
 % Configuração do ambiente
